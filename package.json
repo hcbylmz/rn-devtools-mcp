@@ -1,0 +1,43 @@
+{
+  "name": "rn-devtools-mcp",
+  "version": "1.0.0",
+  "description": "MCP server that connects AI assistants to React Native apps via Chrome DevTools Protocol — inspect components, console, network, and Redux state from Claude/Cursor.",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "rn-devtools-mcp": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "react-native",
+    "devtools",
+    "cdp",
+    "chrome-devtools-protocol",
+    "hermes",
+    "debugger",
+    "claude",
+    "cursor"
+  ],
+  "author": "Hicabi Yilmaz <yilmazhicabi@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hcbylmz/rn-devtools-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hcbylmz/rn-devtools-mcp/issues"
+  },
+  "homepage": "https://github.com/hcbylmz/rn-devtools-mcp#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "ws": "^8.18.0",
+    "zod": "^3.25.76"
+  }
+}
