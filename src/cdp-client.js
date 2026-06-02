@@ -40,7 +40,12 @@ export class CDPClient {
     }
 
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(wsUrl);
+      // Metro's inspector-proxy (RN 0.85+) rejects debugger WebSocket
+      // connections whose Origin header does not match the dev-server origin
+      // (HostAgent verifyClient -> 401 Unauthorized). Send a matching Origin.
+      this.ws = new WebSocket(wsUrl, {
+        origin: `http://localhost:${this.metroPort}`,
+      });
 
       this.ws.on("open", () => {
         this._setupEventListeners();
