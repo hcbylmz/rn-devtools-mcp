@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { CDPClient } from "./cdp-client.js";
+import { parseStackString } from "./stack-parser.js";
 
 const cdpClient = new CDPClient(
   parseInt(process.env.METRO_PORT || "8081", 10)
@@ -355,13 +356,39 @@ server.tool(
   },
   async ({ count = 20, symbolicate = true }) => {
     await cdpClient.ensureConnected();
-    const recent = cdpClient.exceptions.slice(-count);
-    if (recent.length === 0) {
-      return { content: [{ type: "text", text: "No uncaught exceptions captured. (Handled errors logged via console.error appear in get_console_logs.)" }] };
+
+    // Source 1: CDP Runtime.exceptionThrown (structured callFrames).
+    const cdpExceptions = cdpClient.exceptions.map((exc) => ({
+      text: exc.text,
+      t: exc.timestamp,
+      frames: exc.stackTrace?.callFrames ?? [],
+    }));
+
+    // Source 2: React Native ErrorUtils global handler (stack strings). RN
+    // intercepts most uncaught errors here, so they never reach CDP.
+    let rnExceptions = [];
+    try {
+      const result = await cdpClient.evaluate(
+        "JSON.stringify(globalThis.__RN_DEVTOOLS_ERRORS__ || [])",
+      );
+      rnExceptions = (JSON.parse(result.result?.value ?? "[]")).map((err) => ({
+        text: err.isFatal ? `[fatal] ${err.text}` : err.text,
+        t: err.t,
+        frames: parseStackString(err.stack),
+      }));
+    } catch {}
+
+    const all = [...cdpExceptions, ...rnExceptions]
+      .sort((a, b) => (a.t ?? 0) - (b.t ?? 0))
+      .slice(-count);
+
+    if (all.length === 0) {
+      return { content: [{ type: "text", text: "No uncaught exceptions captured. (Handled errors logged via console.error appear in get_console_logs. The ErrorUtils hook captures errors thrown after connect.)" }] };
     }
+
     const blocks = [];
-    for (const exc of recent) {
-      let frames = exc.stackTrace?.callFrames ?? [];
+    for (const exc of all) {
+      let frames = exc.frames;
       if (symbolicate && frames.length > 0) {
         const mapped = await cdpClient.symbolicate(frames);
         if (mapped.length > 0) frames = mapped;

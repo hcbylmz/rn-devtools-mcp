@@ -241,6 +241,38 @@ export class CDPClient {
       this.send("Runtime.enable"),
       this.send("Network.enable"),
     ]);
+    await this.installAppHooks().catch(() => {});
+  }
+
+  // Inject an in-app error capture hook. React Native routes uncaught JS errors
+  // through ErrorUtils.setGlobalHandler, so they rarely surface as a CDP
+  // Runtime.exceptionThrown event. We wrap the global handler (idempotently,
+  // chaining the previous one) so get_exceptions can see real RN errors.
+  async installAppHooks() {
+    const script = `
+      (function() {
+        if (globalThis.__RN_DEVTOOLS_ERR_HOOK) return "already";
+        var EU = globalThis.ErrorUtils;
+        if (!EU || typeof EU.setGlobalHandler !== "function") return "no-errorutils";
+        var buf = globalThis.__RN_DEVTOOLS_ERRORS__ = globalThis.__RN_DEVTOOLS_ERRORS__ || [];
+        var prev = typeof EU.getGlobalHandler === "function" ? EU.getGlobalHandler() : null;
+        EU.setGlobalHandler(function(error, isFatal) {
+          try {
+            buf.push({
+              text: (error && (error.message || String(error))) || "Unknown error",
+              stack: error && error.stack ? String(error.stack) : null,
+              isFatal: !!isFatal,
+              t: Date.now(),
+            });
+            if (buf.length > 100) buf.splice(0, buf.length - 100);
+          } catch (e) {}
+          if (typeof prev === "function") return prev(error, isFatal);
+        });
+        globalThis.__RN_DEVTOOLS_ERR_HOOK = true;
+        return "installed";
+      })()
+    `;
+    return this.evaluate(script);
   }
 
   async getResponseBody(requestId) {
