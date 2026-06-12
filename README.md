@@ -6,10 +6,16 @@ With it, your AI can:
 
 - Read the **React component tree** (names, props, hook state)
 - Tail **console logs** captured from the device
+- Tail **uncaught exceptions / red-box errors** with source-mapped stack frames
 - List **network requests** and fetch response bodies
 - Inspect **Redux state** (with slice/path selectors)
+- Watch the **Redux action log** (type + which slices changed) and **dispatch** actions
+- Discover available **state containers** (Redux, Zustand, Jotai, React Query, Recoil)
 - Evaluate arbitrary JavaScript in the app runtime
 - Inspect any app state via custom expressions (AsyncStorage, globals, …)
+
+Connections **auto-reconnect** — tools transparently re-establish the CDP session
+after an app reload, so you rarely need to call `connect` more than once.
 
 It's the missing bridge between "the app is running on my simulator" and "my AI can actually see what's happening inside it."
 
