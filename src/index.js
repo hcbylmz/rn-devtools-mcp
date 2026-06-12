@@ -61,6 +61,7 @@ server.tool(
   { expression: z.string().describe("JavaScript expression to evaluate") },
   async ({ expression }) => {
     try {
+      await cdpClient.ensureConnected();
       const result = await cdpClient.evaluate(expression);
       if (result.exceptionDetails) {
         return {
@@ -82,6 +83,7 @@ server.tool(
   { depth: z.number().optional().describe("Max tree depth (default: 3)") },
   async ({ depth = 3 }) => {
     try {
+      await cdpClient.ensureConnected();
       const script = `
         (function() {
           const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
@@ -180,6 +182,7 @@ server.tool(
     level: z.enum(["log", "warn", "error", "info", "debug", "all"]).optional().describe("Filter by log level"),
   },
   async ({ count = 50, level = "all" }) => {
+    await cdpClient.ensureConnected();
     let messages = cdpClient.consoleMessages;
     if (level !== "all") {
       messages = messages.filter((msg) => msg.type === level);
@@ -204,6 +207,7 @@ server.tool(
     urlFilter: z.string().optional().describe("Filter requests by URL substring"),
   },
   async ({ count = 30, urlFilter }) => {
+    await cdpClient.ensureConnected();
     let requests = [...cdpClient.networkRequests.values()];
     if (urlFilter) {
       requests = requests.filter((req) => req.url.includes(urlFilter));
@@ -228,6 +232,7 @@ server.tool(
   "Get detailed info for a specific network request including headers and body",
   { url: z.string().describe("URL substring to match the request") },
   async ({ url }) => {
+    await cdpClient.ensureConnected();
     const requests = [...cdpClient.networkRequests.values()];
     const match = requests.reverse().find((req) => req.url.includes(url));
     if (!match) {
@@ -243,6 +248,7 @@ server.tool(
   { url: z.string().describe("URL substring to match the request") },
   async ({ url }) => {
     try {
+      await cdpClient.ensureConnected();
       const requests = [...cdpClient.networkRequests.values()];
       const match = requests.reverse().find((req) => req.url.includes(url));
       if (!match) {
@@ -281,6 +287,7 @@ server.tool(
   },
   async ({ slice, path }) => {
     try {
+      await cdpClient.ensureConnected();
       const sliceLit = slice ? JSON.stringify(slice) : null;
       const pathSafe = path && /^[a-zA-Z_$][\w$]*(\.[a-zA-Z_$][\w$]*)*$/.test(path) ? path : null;
       let expression;
@@ -318,6 +325,7 @@ server.tool(
   { expression: z.string().describe("JS expression that returns the state to inspect") },
   async ({ expression }) => {
     try {
+      await cdpClient.ensureConnected();
       const wrappedExpression = `
         (function() {
           try {
@@ -331,6 +339,179 @@ server.tool(
       const result = await cdpClient.evaluate(wrappedExpression);
       const value = result.result?.value ?? "No result";
       const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      return { content: [{ type: "text", text }] };
+    } catch (error) {
+      return { content: [{ type: "text", text: `Failed: ${error.message}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "get_exceptions",
+  "Get uncaught JS exceptions / red-box errors captured from the app, with source-mapped stack frames",
+  {
+    count: z.number().optional().describe("Number of recent exceptions (default: 20)"),
+    symbolicate: z.boolean().optional().describe("Map minified frames to source file:line via Metro (default: true)"),
+  },
+  async ({ count = 20, symbolicate = true }) => {
+    await cdpClient.ensureConnected();
+    const recent = cdpClient.exceptions.slice(-count);
+    if (recent.length === 0) {
+      return { content: [{ type: "text", text: "No uncaught exceptions captured. (Handled errors logged via console.error appear in get_console_logs.)" }] };
+    }
+    const blocks = [];
+    for (const exc of recent) {
+      let frames = exc.stackTrace?.callFrames ?? [];
+      if (symbolicate && frames.length > 0) {
+        const mapped = await cdpClient.symbolicate(frames);
+        if (mapped.length > 0) frames = mapped;
+      }
+      const stackText = frames
+        .slice(0, 12)
+        .map((frame) => {
+          const fn = frame.functionName || frame.methodName || "<anonymous>";
+          const file = frame.file ?? frame.url ?? "?";
+          const line = frame.lineNumber ?? 0;
+          const col = frame.column ?? frame.columnNumber ?? 0;
+          return `    at ${fn} (${file}:${line}:${col})`;
+        })
+        .join("\n");
+      blocks.push(`${exc.text}${stackText ? "\n" + stackText : ""}`);
+    }
+    return { content: [{ type: "text", text: blocks.join("\n\n") }] };
+  }
+);
+
+server.tool(
+  "get_redux_actions",
+  "Get the recent Redux action log (type + which top-level slices changed). Installs a dispatch hook on first call.",
+  { count: z.number().optional().describe("Number of recent actions (default: 30)") },
+  async ({ count = 30 }) => {
+    try {
+      await cdpClient.ensureConnected();
+      const script = `
+        (function() {
+          const store = globalThis.__REDUX_STORE__;
+          if (!store || typeof store.dispatch !== 'function') {
+            return JSON.stringify({ error: "Redux store not exposed. Add: globalThis.__REDUX_STORE__ = store;" });
+          }
+          if (!store.__rnDevtoolsActionHook) {
+            const buf = globalThis.__RN_DEVTOOLS_ACTIONS__ = globalThis.__RN_DEVTOOLS_ACTIONS__ || [];
+            const orig = store.dispatch;
+            store.dispatch = function(action) {
+              const before = store.getState();
+              const result = orig.apply(this, arguments);
+              const after = store.getState();
+              let changed = [];
+              try {
+                changed = Object.keys(after).filter((k) => after[k] !== before[k]);
+              } catch (e) {}
+              buf.push({ type: action && action.type ? action.type : '(unknown)', t: Date.now(), changedSlices: changed });
+              if (buf.length > 300) buf.splice(0, buf.length - 300);
+              return result;
+            };
+            store.__rnDevtoolsActionHook = true;
+          }
+          const buf = globalThis.__RN_DEVTOOLS_ACTIONS__ || [];
+          return JSON.stringify(buf.slice(-${Math.max(1, Math.floor(count))}));
+        })()
+      `;
+      const result = await cdpClient.evaluate(script);
+      const raw = result.result?.value ?? "[]";
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return { content: [{ type: "text", text: raw }] };
+      }
+      if (parsed.error) {
+        return { content: [{ type: "text", text: parsed.error }], isError: true };
+      }
+      if (parsed.length === 0) {
+        return { content: [{ type: "text", text: "Action hook installed. No actions dispatched yet — interact with the app and call again." }] };
+      }
+      const lines = parsed.map((action) => {
+        const changed = action.changedSlices?.length ? ` [changed: ${action.changedSlices.join(", ")}]` : "";
+        return `${action.type}${changed}`;
+      });
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    } catch (error) {
+      return { content: [{ type: "text", text: `Failed: ${error.message}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "dispatch_redux_action",
+  "Dispatch a Redux action into the running app (for testing reducers/flows)",
+  { action: z.string().describe('Action as JSON, e.g. {"type":"auth/logout"} or {"type":"counter/add","payload":5}') },
+  async ({ action }) => {
+    try {
+      await cdpClient.ensureConnected();
+      let parsedAction;
+      try {
+        parsedAction = JSON.parse(action);
+      } catch (parseError) {
+        return { content: [{ type: "text", text: `Invalid action JSON: ${parseError.message}` }], isError: true };
+      }
+      if (!parsedAction || typeof parsedAction.type !== "string") {
+        return { content: [{ type: "text", text: 'Action must be an object with a string "type".' }], isError: true };
+      }
+      const script = `
+        (function() {
+          const store = globalThis.__REDUX_STORE__;
+          if (!store || typeof store.dispatch !== 'function') {
+            return JSON.stringify({ error: "Redux store not exposed." });
+          }
+          try {
+            store.dispatch(${JSON.stringify(parsedAction)});
+            return JSON.stringify({ ok: true });
+          } catch (e) {
+            return JSON.stringify({ error: e.message });
+          }
+        })()
+      `;
+      const result = await cdpClient.evaluate(script);
+      const outcome = JSON.parse(result.result?.value ?? "{}");
+      if (outcome.error) {
+        return { content: [{ type: "text", text: outcome.error }], isError: true };
+      }
+      return { content: [{ type: "text", text: `Dispatched: ${parsedAction.type}` }] };
+    } catch (error) {
+      return { content: [{ type: "text", text: `Failed: ${error.message}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "discover_stores",
+  "Probe the app runtime for known state containers (Redux, Zustand, Jotai, React Query, Recoil) and report what's available and how to read each.",
+  {},
+  async () => {
+    try {
+      await cdpClient.ensureConnected();
+      const script = `
+        (function() {
+          const out = {};
+          const g = globalThis;
+          if (g.__REDUX_STORE__ && typeof g.__REDUX_STORE__.getState === 'function') {
+            out.redux = { available: true, slices: Object.keys(g.__REDUX_STORE__.getState()), read: "get_redux_state" };
+          }
+          if (g.__REACT_QUERY_CLIENT__) {
+            out.reactQuery = { available: true, read: "get_app_state with __REACT_QUERY_CLIENT__.getQueryCache().getAll()" };
+          }
+          if (g.__JOTAI_DEVTOOLS_STORE__ || g.jotaiStore) {
+            out.jotai = { available: true };
+          }
+          if (g.__RECOIL_DEVTOOLS_EXTENSION__) {
+            out.recoil = { available: true };
+          }
+          out.reactDevToolsHook = typeof g.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object';
+          return JSON.stringify(out, null, 2);
+        })()
+      `;
+      const result = await cdpClient.evaluate(script);
+      const text = result.result?.value ?? "{}";
       return { content: [{ type: "text", text }] };
     } catch (error) {
       return { content: [{ type: "text", text: `Failed: ${error.message}` }], isError: true };
