@@ -1,5 +1,9 @@
 # rn-devtools-mcp
 
+[![CI](https://github.com/hcbylmz/rn-devtools-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/hcbylmz/rn-devtools-mcp/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/rn-devtools-mcp.svg)](https://www.npmjs.com/package/rn-devtools-mcp)
+[![license](https://img.shields.io/npm/l/rn-devtools-mcp.svg)](./LICENSE)
+
 An [MCP](https://modelcontextprotocol.io) server that lets AI assistants (Claude Code, Cursor, Windsurf, etc.) inspect a running React Native app through the Chrome DevTools Protocol exposed by Metro / Hermes.
 
 With it, your AI can:
