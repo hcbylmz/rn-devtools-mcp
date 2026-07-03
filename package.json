@@ -1,5 +1,5 @@
 {
-  "name": "rn-devtools-mcp",
+  "name": "@hcbylmz/rn-devtools-mcp",
   "version": "1.0.0",
   "description": "MCP server that connects AI assistants to React Native apps via Chrome DevTools Protocol \u2014 inspect components, console, network, and Redux state from Claude/Cursor.",
   "type": "module",

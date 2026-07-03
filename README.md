@@ -1,8 +1,8 @@
 # rn-devtools-mcp
 
 [![CI](https://github.com/hcbylmz/rn-devtools-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/hcbylmz/rn-devtools-mcp/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/rn-devtools-mcp.svg)](https://www.npmjs.com/package/rn-devtools-mcp)
-[![license](https://img.shields.io/npm/l/rn-devtools-mcp.svg)](./LICENSE)
+[![npm version](https://img.shields.io/npm/v/%40hcbylmz%2Frn-devtools-mcp.svg)](https://www.npmjs.com/package/@hcbylmz/rn-devtools-mcp)
+[![license](https://img.shields.io/npm/l/%40hcbylmz%2Frn-devtools-mcp.svg)](./LICENSE)
 
 An [MCP](https://modelcontextprotocol.io) server that lets AI assistants (Claude Code, Cursor, Windsurf, etc.) inspect a running React Native app through the Chrome DevTools Protocol exposed by Metro / Hermes.
 
@@ -81,6 +81,29 @@ If Metro isn't running or the app isn't in dev mode, `connect` will fail with a 
 - Metro bundler running (the app must be actively connected)
 
 ## Install
+
+The quickest way — no clone needed:
+
+```bash
+# Claude Code
+claude mcp add rn-devtools -- npx -y @hcbylmz/rn-devtools-mcp
+```
+
+Or for any MCP client:
+
+```json
+{
+  "mcpServers": {
+    "rn-devtools": {
+      "command": "npx",
+      "args": ["-y", "@hcbylmz/rn-devtools-mcp"],
+      "env": { "METRO_PORT": "8081" }
+    }
+  }
+}
+```
+
+From source, if you prefer:
 
 ```bash
 git clone https://github.com/hcbylmz/rn-devtools-mcp.git
